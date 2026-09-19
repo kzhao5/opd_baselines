@@ -1,0 +1,7 @@
+datasets==2.21.0
+evalplus==0.3.1
+multiprocess==0.70.16
+numpy==2.3.5
+Pebble==5.2.2
+pyarrow==25.0.1
+# python 3.11.16; CPU only, used just to score HumanEval+.

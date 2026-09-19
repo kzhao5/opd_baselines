@@ -1,0 +1,19 @@
+# The eleven baselines of the post-trained 0.6B student. Tab-separated; read with: column -t -s$'\t' RUN_MATRIX.tsv
+# a100_h = wall clock we measured for the SAME method on the 0.6B-Base student, 4x A100-80GB (2 actor + 2 teacher).
+# l40s_h = expected wall clock on one 3-GPU L40S slot (2 actor + 1 teacher). Planning range, not a promise.
+# offline = trajectory file that must exist before training starts (scripts/02_offline_data.sh).
+method	script	budget	offline	a100_h	l40s_h
+sft	opd/scripts/baselines/sft.sh	16384	teacher	4.1	10-14
+fastopd1024	opd/scripts/baselines/fastopd/1024.sh	1024	-	3.3	8-12
+seqkd	opd/scripts/baselines/seqkd.sh	16384	teacher	19.0	48-66
+fastopd2048	opd/scripts/baselines/fastopd/2048.sh	2048	-	8.0	20-28
+trd	opd/scripts/baselines/trd.sh	16384	trd	17.5	44-61
+fastopd4096	opd/scripts/baselines/fastopd/4096.sh	4096	-	12.5	31-44
+grpo	opd/scripts/baselines/grpo.sh	16384	-	22.5	56-79
+fastopd8192	opd/scripts/baselines/fastopd/8192.sh	8192	-	20.8	52-73
+opd	opd/scripts/baselines/opd.sh	16384	-	50.0	125-175
+relayopd	opd/scripts/relay_opd/train.sh	16384	-	16.0	40-56
+skd	opd/scripts/baselines/skd.sh	16384	-	57.0	143-200
+# Offline data generation: teacher trajectories ~3.2 h on 4 A100 (~10 h on a 3-GPU slot);
+# TRD trajectories ~6.1 h on 4 A100 (~20 h on a 3-GPU slot).
+# All eleven with two slots in parallel: roughly 12-17 days. The first six rows alone: roughly 4-5 days.

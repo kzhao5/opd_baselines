@@ -57,14 +57,63 @@ BENCH_PATHS = {
     "minervamath": "minervamath.parquet",
     "gpqa": "gpqa.parquet",
     "gpqa_diamond": "gpqa_diamond.parquet",
+    "gpqa_diamond_mini": "gpqa_diamond_mini.parquet",
+    "mmlu_pro": "mmlu_pro.parquet",
+    "mmlu_pro_mini": "mmlu_pro_mini.parquet",
+    "mmlu_pro_trunc_gatedB": "mmlu_pro_trunc_gatedB.parquet",
+    "mmlu_pro_trunc_relay": "mmlu_pro_trunc_relay.parquet",
+    "mmlu_pro_trunc_fastopd": "mmlu_pro_trunc_fastopd.parquet",
+    "mmlu_pro_trunc_opd": "mmlu_pro_trunc_opd.parquet",
+    "mmlu_pro_trunc_gatedB60": "mmlu_pro_trunc_gatedB60.parquet",
+    "mmlu_pro_trunc_student": "mmlu_pro_trunc_student.parquet",
+    "mmlu_pro_trunc_teacher": "mmlu_pro_trunc_teacher.parquet",
+    "humanevalplus": "humanevalplus.parquet",
+    "lcb": "lcb.parquet",
+    "lcb_trunc_opd": "lcb_trunc_opd.parquet",
     "hmmt_feb_2026": "hmmt_feb_2026.parquet",
     "hmmt_nov_2025": "hmmt_nov_2025.parquet",
     "dapo128": "dapo128.parquet",
 }
 
 
+import re as _re
+_EVAL_STOP_TOKEN_IDS = [int(x) for x in os.environ.get("EVAL_STOP_TOKEN_IDS", "").replace(";", ",").split(",") if x.strip()] or None
+# Multiple-choice benches: graded by extracted option letter, not math-verify.
+MC_BENCHES = {"mmlu_pro_trunc_gatedB60", "mmlu_pro_trunc_student", "gpqa", "gpqa_diamond", "gpqa_diamond_mini",
+              "mmlu_pro", "mmlu_pro_mini",
+              "mmlu_pro_trunc_opd", "mmlu_pro_trunc_fastopd",
+              "mmlu_pro_trunc_relay", "mmlu_pro_trunc_gatedB",
+              "mmlu_pro_trunc_teacher"}
+
+
+def grade_mc_answer(resp, gt_answer):
+    """Extract the chosen option letter (A-J) from a response and compare to gt."""
+    if gt_answer is None:
+        return False
+    gt = str(gt_answer).strip().upper()[:1]
+    if not gt:
+        return False
+    # priority: last \boxed{X} > "(final )answer/option is/: **X**" > last "(X)"
+    m = _re.findall(r"\\boxed\{\s*\(?\s*([A-Ja-j])\s*\)?\s*\}", resp)
+    if not m:
+        m = _re.findall(
+            r"(?:final\s+answer|correct\s+answer|correct\s+option|answer|option|choice)"
+            r"\b[\s:*]*(?:is|=)?[\s:*]*\(?\s*([A-Ja-j])\b",
+            resp, _re.IGNORECASE)
+    if not m:
+        m = _re.findall(r"\(\s*([A-Ja-j])\s*\)", resp)
+    return bool(m) and m[-1].upper() == gt
+
+
+CODE_BENCHES = {"humanevalplus", "lcb", "lcb_trunc_opd"}  # code benches: not graded here; scored by codeeval env
+
+
 def grade_math_answer(resp, gt_answer, bench):
     """Return whether a response matches the benchmark answer."""
+    if bench in CODE_BENCHES:
+        return False  # scored separately
+    if bench in MC_BENCHES:
+        return grade_mc_answer(resp, gt_answer)
     try:
         if bench == "olympiad":
             if isinstance(gt_answer, list) and len(gt_answer) > 0:
@@ -388,6 +437,7 @@ def run_one_bench(args, llm, tok, spec_config, bench, n_samples):
     # yet reproducible (replica k of every problem uses base+k).
     sp_list = [
         SamplingParams(
+            stop_token_ids=_EVAL_STOP_TOKEN_IDS,
             max_tokens=args.max_new, temperature=args.temperature,
             top_p=args.top_p, seed=args.seed + sample_idx_map[i],
         )
@@ -655,6 +705,25 @@ def main():
     # One model load, multiple benches.
     for bench, n_samples in zip(bench_list, ns_list):
         run_one_bench(args, llm, tok, spec_config, bench, n_samples)
+
+    # 2026-09-05: vLLM EngineCore 在解释器退出(atexit 清理)时反复卡在 futex_wait, 让 job 挂 4-9h 占满整卡.
+    # 结果已全部落盘(每个 bench 的 jsonl+summary 在 run_one_bench 内写完), 这里主动杀掉子进程树后硬退出.
+    print("[exit] all benches done; killing engine children and hard-exiting", flush=True)
+    import sys as _sys, os as _os
+    _sys.stdout.flush(); _sys.stderr.flush()
+    try:
+        import psutil as _ps
+        kids = _ps.Process().children(recursive=True)
+        for k in kids:
+            try: k.terminate()
+            except Exception: pass
+        _ps.wait_procs(kids, timeout=15)
+        for k in kids:
+            try: k.kill()
+            except Exception: pass
+    except Exception as e:
+        print(f"[exit] child cleanup error: {e}", flush=True)
+    _os._exit(0)
 
 
 if __name__ == "__main__":

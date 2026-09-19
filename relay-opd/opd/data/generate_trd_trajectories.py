@@ -3,12 +3,18 @@
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
 import pandas as pd
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
+
+# Base students (Qwen3-*-Base) declare only <|endoftext|> as EOS, so vLLM would keep generating past
+# <|im_end|>. GEN_STOP_TOKEN_IDS="151643;151645" matches the rollout / eval stop set of the base-student
+# table. Unset = original behaviour.
+_STOP_TOKEN_IDS = [int(x) for x in os.environ.get("GEN_STOP_TOKEN_IDS", "").replace(";", ",").split(",") if x.strip()] or None
 
 
 DEFAULT_SYSTEM = "Please reason step by step, and put your final answer within \\boxed{}."
@@ -214,6 +220,7 @@ def main() -> None:
             temperature=args.temperature,
             top_p=args.top_p,
             seed=args.seed,
+            stop_token_ids=_STOP_TOKEN_IDS,
         )
         for _ in rows
     ]
